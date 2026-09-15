@@ -364,6 +364,7 @@ let pollTimer = null;
 let historyStudentId = null;
 let displayMode = false;
 let quickEntryId = null;
+let dirty = false;
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -399,9 +400,8 @@ function formatDate(iso) {
   const d = new Date(iso);
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm} ${hh}:${min}`;
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 const MODE_CONFIG = {
@@ -472,6 +472,7 @@ async function connectExistingBin(id) {
 }
 async function loadState(initial) {
   if (!binId) return;
+  if (!initial && dirty) return; // des changements locaux n'ont pas encore été sauvegardés : ne pas écraser
   try {
     const res = await fetch(`${SYNC_URL_BASE}/${binId}/latest`, {
       headers: { "X-Master-Key": apiKey },
@@ -492,6 +493,7 @@ async function loadState(initial) {
   }
 }
 function scheduleSave() {
+  dirty = true;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveState, 700);
 }
@@ -504,11 +506,14 @@ async function saveState() {
       body: JSON.stringify(state),
     });
     if (!res.ok) throw new Error("save failed");
+    dirty = false;
     document.getElementById("save-error").classList.add("hidden");
     document.getElementById("sync-status").textContent =
       "Synchronisé à " + new Date().toLocaleTimeString("fr-FR");
   } catch (e) {
+    // on garde dirty=true : on retentera plutôt que de risquer d'écraser avec une version distante obsolète
     document.getElementById("save-error").classList.remove("hidden");
+    saveTimer = setTimeout(saveState, 4000);
   }
 }
 
