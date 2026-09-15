@@ -166,6 +166,17 @@
     margin-bottom: 1.25rem;
     flex-wrap: wrap;
   }
+  .quick-entry {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem 0.65rem;
+    background: var(--paper-dark);
+  }
+  .quick-entry input[type="date"] { flex: 0 0 140px; font-size: 0.8rem; padding: 0.4rem 0.5rem; }
+  .quick-entry input[type="text"] { flex: 1 1 160px; font-size: 0.8rem; padding: 0.4rem 0.5rem; }
+  .quick-entry button { font-size: 0.78rem; padding: 0.4rem 0.75rem; border-radius: 6px; }
 </style>
 </head>
 <body>
@@ -352,6 +363,7 @@ let saveTimer = null;
 let pollTimer = null;
 let historyStudentId = null;
 let displayMode = false;
+let quickEntryId = null;
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -514,6 +526,7 @@ function showSetup() {
 function setMode(m) {
   mode = m;
   document.getElementById("search-input").value = "";
+  quickEntryId = null;
   renderAll();
 }
 
@@ -733,7 +746,7 @@ function renderStudents() {
     addBtn.className = "round-btn add";
     addBtn.textContent = "+";
     addBtn.title = `Ajouter une ${cfg().singular}`;
-    addBtn.onclick = () => addEntry(s.id);
+    addBtn.onclick = () => toggleQuickEntry(s.id);
     actions.appendChild(addBtn);
 
     const undoBtn = document.createElement("button");
@@ -751,6 +764,27 @@ function renderStudents() {
 
     row.appendChild(actions);
     list.appendChild(row);
+
+    if (quickEntryId === s.id) {
+      const qe = document.createElement("div");
+      qe.className = "quick-entry";
+      const today = new Date().toISOString().slice(0, 10);
+      qe.innerHTML = `
+        <input type="date" id="qe-date-${s.id}" value="${today}">
+        <input type="text" id="qe-note-${s.id}" placeholder="Raison (optionnel)">
+      `;
+      const confirmBtn = document.createElement("button");
+      confirmBtn.className = "btn-primary";
+      confirmBtn.textContent = "Ajouter";
+      confirmBtn.onclick = () => confirmQuickEntry(s.id);
+      qe.appendChild(confirmBtn);
+      const cancelBtn = document.createElement("button");
+      cancelBtn.className = "btn-outline";
+      cancelBtn.textContent = "Annuler";
+      cancelBtn.onclick = () => { quickEntryId = null; renderStudents(); };
+      qe.appendChild(cancelBtn);
+      list.appendChild(qe);
+    }
 
     const menuDiv = document.createElement("div");
     menuDiv.className = "row-menu hidden";
@@ -795,6 +829,28 @@ function findStudent(studentId) {
   return c ? c.students.find((s) => s.id === studentId) : null;
 }
 
+function toggleQuickEntry(studentId) {
+  quickEntryId = quickEntryId === studentId ? null : studentId;
+  document.querySelectorAll(".row-menu").forEach((m) => m.classList.add("hidden"));
+  renderStudents();
+  if (quickEntryId === studentId) {
+    const noteInput = document.getElementById("qe-note-" + studentId);
+    if (noteInput) noteInput.focus();
+  }
+}
+function confirmQuickEntry(studentId) {
+  const s = findStudent(studentId);
+  if (!s) return;
+  const dateInput = document.getElementById("qe-date-" + studentId);
+  const noteInput = document.getElementById("qe-note-" + studentId);
+  const dateVal = dateInput && dateInput.value ? dateInput.value : new Date().toISOString().slice(0, 10);
+  const note = noteInput ? noteInput.value.trim() : "";
+  const iso = new Date(dateVal + "T12:00:00").toISOString();
+  entriesOf(s).push({ id: uid(), date: iso, note, active: true });
+  quickEntryId = null;
+  scheduleSave();
+  renderAll();
+}
 function addEntry(studentId) {
   const s = findStudent(studentId);
   if (!s) return;
