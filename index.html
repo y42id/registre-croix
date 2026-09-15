@@ -123,6 +123,49 @@
   .setup-actions { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1rem; }
   .id-display { background: var(--paper); border: 1px dashed var(--paper-line); border-radius: 6px; padding: 0.75rem; font-family: monospace; font-size: 0.9rem; word-break: break-all; margin: 0.5rem 0; }
   .hidden { display: none !important; }
+  .display-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.85rem;
+  }
+  .display-card {
+    aspect-ratio: 1 / 1;
+    background: var(--white);
+    border: 2.5px solid var(--paper-line);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    text-align: center;
+  }
+  .display-card .name {
+    font-weight: 600;
+    font-size: 0.82rem;
+    line-height: 1.15;
+    margin-bottom: 0.5rem;
+    word-break: break-word;
+  }
+  .display-card .symbols {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    justify-content: center;
+  }
+  .display-card .symbols span {
+    font-family: Georgia, serif;
+    font-weight: 700;
+    font-size: 1.3rem;
+  }
+  .display-legend {
+    display: flex;
+    gap: 1.5rem;
+    font-size: 0.8rem;
+    opacity: 0.6;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+  }
 </style>
 </head>
 <body>
@@ -149,13 +192,20 @@
         <h1 id="title">Registre de classe</h1>
         <p class="sub">Un total par élève, quel que soit le format du cours — demi-groupe ou classe entière.</p>
       </div>
-      <button class="btn-outline" onclick="showBinId()" style="white-space:nowrap;">Identifiant de base</button>
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        <button class="btn-outline" id="btn-display-toggle" onclick="toggleDisplayMode()" style="white-space:nowrap;">Vue projection</button>
+        <button class="btn-outline" onclick="showBinId()" style="white-space:nowrap;">Identifiant de base</button>
+      </div>
     </div>
     <p class="hint" id="threshold-hint"></p>
 
-    <div class="mode-row">
+    <div class="mode-row" id="mode-row-el">
       <button class="mode-btn" id="mode-croix" onclick="setMode('croix')">× Croix</button>
       <button class="mode-btn" id="mode-etoile" onclick="setMode('etoiles')">★ Étoiles</button>
+    </div>
+    <div class="display-legend hidden" id="display-legend">
+      <span><span style="color:var(--vermillon); font-weight:700;">×</span> croix — 3 : retenue, 6 : CPE</span>
+      <span><span style="color:var(--petrol); font-weight:700;">★</span> étoiles — 3 : privilège, 6 : impression 3D</span>
     </div>
 
     <p class="summary" id="summary"></p>
@@ -164,7 +214,7 @@
     <div class="class-tabs" id="class-tabs"></div>
 
     <div id="class-content">
-      <div class="toolbar">
+      <div class="toolbar" id="toolbar-el">
         <input type="text" id="new-student-name" placeholder="Ajouter un élève…">
         <button class="btn-primary" onclick="addStudentFromInput()">Ajouter</button>
         <button class="btn-outline" onclick="toggleBulk()">Ajout multiple</button>
@@ -301,6 +351,7 @@ let apiKey = EMBEDDED_API_KEY;
 let saveTimer = null;
 let pollTimer = null;
 let historyStudentId = null;
+let displayMode = false;
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -466,14 +517,84 @@ function setMode(m) {
   renderAll();
 }
 
+function toggleDisplayMode() {
+  displayMode = !displayMode;
+  const btn = document.getElementById("btn-display-toggle");
+  btn.textContent = displayMode ? "Retour édition" : "Vue projection";
+  document.getElementById("mode-row-el").classList.toggle("hidden", displayMode);
+  document.getElementById("toolbar-el").classList.toggle("hidden", displayMode);
+  document.getElementById("threshold-hint").classList.toggle("hidden", displayMode);
+  renderAll();
+}
+
 function renderAll() {
   document.getElementById("mode-croix").className = "mode-btn" + (mode === "croix" ? " active-croix" : "");
   document.getElementById("mode-etoile").className = "mode-btn" + (mode === "etoiles" ? " active-etoile" : "");
   document.getElementById("threshold-hint").textContent =
     `${cfg().tier1Threshold} ${cfg().label.toLowerCase()} : ${cfg().tier1Label.toLowerCase()}. ${cfg().tier2Threshold} ${cfg().label.toLowerCase()} : ${cfg().tier2Label.toLowerCase()}.`;
-  renderSummary();
+  if (!displayMode) renderSummary();
+  else document.getElementById("summary").textContent = "";
   renderClassTabs();
-  renderStudents();
+  if (displayMode) {
+    renderDisplayGrid();
+  } else {
+    document.getElementById("search-input").classList.remove("force-hidden");
+    document.getElementById("bulk-area").classList.add("hidden");
+    renderStudents();
+  }
+}
+
+function tierForCounts(marksCount, starsCount) {
+  const croixTier = marksCount >= 6 ? 2 : marksCount >= 3 ? 1 : 0;
+  const etoileTier = starsCount >= 6 ? 2 : starsCount >= 3 ? 1 : 0;
+  return { croixTier, etoileTier };
+}
+
+function renderDisplayGrid() {
+  const c = activeClass();
+  const list = document.getElementById("students-list");
+  list.className = "display-grid";
+  list.innerHTML = "";
+  if (!c || c.students.length === 0) {
+    list.className = "";
+    list.innerHTML = '<div class="empty-state">Aucun élève à afficher pour l\'instant.</div>';
+    return;
+  }
+  const legend = document.getElementById("display-legend");
+  legend.classList.remove("hidden");
+
+  const students = c.students.slice().sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  students.forEach((s) => {
+    const marksCount = (s.marks || []).filter((e) => e.active).length;
+    const starsCount = (s.stars || []).filter((e) => e.active).length;
+    const { croixTier, etoileTier } = tierForCounts(marksCount, starsCount);
+
+    let borderColor = "var(--paper-line)";
+    let bg = "var(--white)";
+    if (croixTier === 2) { borderColor = "var(--vermillon)"; bg = "var(--tint-t2)"; }
+    else if (croixTier === 1) { borderColor = "var(--ochre)"; bg = "var(--tint-t1)"; }
+    else if (etoileTier === 2) { borderColor = "var(--petrol-deep)"; bg = "var(--tint-t2-e)"; }
+    else if (etoileTier === 1) { borderColor = "var(--petrol)"; bg = "var(--tint-t1-e)"; }
+
+    const card = document.createElement("div");
+    card.className = "display-card";
+    card.style.borderColor = borderColor;
+    card.style.background = bg;
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "name";
+    nameEl.textContent = s.name;
+    card.appendChild(nameEl);
+
+    const symbols = document.createElement("div");
+    symbols.className = "symbols";
+    symbols.innerHTML = `
+      <span style="color:${marksCount > 0 ? "var(--vermillon)" : "var(--ink)"}; opacity:${marksCount > 0 ? 1 : 0.2};">×${marksCount > 0 ? marksCount : ""}</span>
+      <span style="color:${starsCount > 0 ? "var(--petrol)" : "var(--ink)"}; opacity:${starsCount > 0 ? 1 : 0.2};">★${starsCount > 0 ? starsCount : ""}</span>
+    `;
+    card.appendChild(symbols);
+    list.appendChild(card);
+  });
 }
 
 function renderSummary() {
@@ -549,6 +670,8 @@ function renderStudents() {
   const c = activeClass();
   const list = document.getElementById("students-list");
   const searchInput = document.getElementById("search-input");
+  list.className = "";
+  document.getElementById("display-legend").classList.add("hidden");
   list.innerHTML = "";
   if (!c) { list.innerHTML = '<div class="empty-state">Aucune classe sélectionnée.</div>'; return; }
 
